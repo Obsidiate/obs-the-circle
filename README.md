@@ -38,6 +38,21 @@ Then in OBS — no plugin, nothing to compile:
 
 Both URLs sit in the control panel with copy buttons, so you never have to type them.
 
+### Or let OBS start it for you
+
+If you'd rather not start anything by hand, add the bundled script once:
+
+**Tools → Scripts → +** → pick `obs/the-circle.lua`, then set **App folder** to where you
+unzipped it.
+
+From then on The Circle starts when OBS starts and stops when OBS stops — nothing runs
+while OBS is closed. OBS has Lua built in, so there's still no plugin to install and
+nothing to compile. If OBS is force-quit, a heartbeat makes the server shut itself down
+within about 90 seconds rather than lingering.
+
+You still add the browser source and dock as above; the script's description panel in OBS
+shows both URLs.
+
 The only requirement is [Node.js](https://nodejs.org) (take the LTS installer). The
 release bundles everything else — there's no `npm install`.
 

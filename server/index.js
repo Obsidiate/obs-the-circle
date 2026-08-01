@@ -17,11 +17,22 @@ import {
   getState, subscribe, applyPatch, setGoLive, nudgeTime, resetTime, setTarget, previewMode, sample,
 } from './state.js';
 import { geocode } from './geocode.js';
+import { startObsMode } from './obs-mode.js';
 import { wallToUtc, utcToWall, formatLocal, zoneFor } from './time.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = join(ROOT, 'public');
-const PORT = Number(process.env.PORT || 7333);
+// CLI args so the OBS Lua script can pass config without depending on environment
+// inheritance, which is unreliable for a process spawned by a Windows GUI app.
+const argv = process.argv.slice(2);
+const argOf = (name) => {
+  const i = argv.indexOf(name);
+  return i >= 0 ? argv[i + 1] : null;
+};
+// OBS-managed: lifetime tied to OBS via pidfile + heartbeat. See server/obs-mode.js.
+const OBS_MANAGED = argv.includes('--obs') || !!process.env.OBS_MANAGED;
+
+const PORT = Number(argOf('--port') || process.env.PORT || 7333);
 // Bound to all interfaces by default so the panel opens on a phone — genuinely useful when
 // you are at the location and the streaming machine is elsewhere. HOST=127.0.0.1 to restrict.
 const HOST = process.env.HOST || '0.0.0.0';
@@ -191,7 +202,7 @@ const server = createServer(async (req, res) => {
  * desktop should still get a running server, not a crash. Set NO_OPEN=1 to skip.
  */
 function openBrowser(url) {
-  if (process.env.NO_OPEN) return;
+  if (process.env.NO_OPEN || OBS_MANAGED) return;
   const cmd = process.platform === 'darwin' ? 'open'
     : process.platform === 'win32' ? 'cmd'
       : 'xdg-open';
@@ -239,8 +250,13 @@ server.listen(PORT, HOST, () => {
   console.log(`  │  Target   ${s.config.target.name}`);
   console.log(`  │  Go live  ${formatLocal(s.config.goLiveMs, s.config.target.tz)}`);
   console.log('  │');
-  console.log('  │  Leave this window open while you stream.');
+  if (OBS_MANAGED) {
+    console.log('  │  Started by OBS. This closes automatically when OBS does.');
+  } else {
+    console.log('  │  Leave this window open while you stream.');
+  }
   console.log('  └──────────────────────────────────────────────────────────');
   console.log('');
   openBrowser(`http://localhost:${PORT}/control`);
+  if (OBS_MANAGED) startObsMode(ROOT, () => server.close(() => process.exit(0)));
 });

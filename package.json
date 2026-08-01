@@ -4,10 +4,11 @@
   "description": "The Circle — a battle-royale countdown overlay for OBS",
   "main": "index.js",
   "scripts": {
-    "test": "node test/ring.test.mjs",
+    "test": "node test/ring.test.mjs && node test/obs-watchdog.test.mjs",
     "build:style": "node scripts/build-style.mjs",
     "start": "node server/index.js",
-    "package": "node scripts/package-release.mjs"
+    "package": "node scripts/package-release.mjs",
+    "test:lua": "luajit test/obs-lua.test.lua"
   },
   "keywords": [],
   "author": "",

@@ -24,6 +24,7 @@ const STAGE = join(OUT, NAME);
 const INCLUDE = [
   'server',
   'public',
+  'obs',
   'package.json',
   'start.sh',
   'start.command',
