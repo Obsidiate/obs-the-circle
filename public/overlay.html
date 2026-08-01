@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Circle — overlay</title>
+<meta name="color-scheme" content="dark">
+<link rel="stylesheet" href="/vendor/lora.css">
+<link rel="stylesheet" href="/vendor/maplibre-gl.css">
+<link rel="stylesheet" href="/css/brand.css">
+<link rel="stylesheet" href="/css/overlay.css">
+</head>
+<body>
+  <div id="stage">
+    <div id="map"></div>
+    <canvas id="veil"></canvas>
+    <div id="ambient"></div>
+    <div id="hud">
+      <div id="eyebrow" class="eyebrow">Until live</div>
+      <div id="clock">--:--:--</div>
+      <div id="sub"></div>
+      <div id="delay" hidden></div>
+    </div>
+    <div id="attrib">© OpenStreetMap</div>
+  </div>
+  <script type="module" src="/js/overlay.js"></script>
+</body>
+</html>

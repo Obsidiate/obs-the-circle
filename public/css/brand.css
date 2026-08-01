@@ -1,0 +1,48 @@
+/* WIM brand tokens, lifted verbatim from wroteitmyself.com so the overlay and the site
+   are the same design system rather than two things that look vaguely similar. */
+:root {
+  --ink: #060608;
+  --text: #E8EAED;
+  --body: #C8CCD2;
+  --muted: #9CA2AA;
+  --faint: #666C74;
+  --line: rgba(255, 255, 255, .12);
+  --line-soft: rgba(255, 255, 255, .07);
+  --accent: #62BDDD;          /* the pencil-tip cyan from the logo */
+  --accent-bright: #8BCFEB;
+  --field: rgba(255, 255, 255, .045);
+  --btn-text: #04222B;
+
+  --warn: #e0b15c;            /* delayed */
+  --alert: #e0706e;           /* running late */
+  --good: #5fd08a;            /* on schedule */
+
+  --serif: 'Lora', Georgia, serif;
+}
+
+* { box-sizing: border-box; }
+
+/* The site's eyebrow: uppercase, wide tracking, preceded by a glowing dot. */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: .65em;
+  font-weight: 600;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.eyebrow::before {
+  content: "";
+  width: .5em;
+  height: .5em;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 10px currentColor;
+}
+
+/* Digits in a fixed cell. Lora's figures are proportional, so a raw countdown would
+   visibly jitter as the numbers change — this pins each glyph to its own column. */
+.digit { display: inline-block; width: .62em; text-align: center; }
+.colon { display: inline-block; width: .28em; text-align: center; }
+.sign  { display: inline-block; width: .5em;  text-align: center; }

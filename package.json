@@ -1,0 +1,20 @@
+{
+  "name": "obs-the-circle",
+  "version": "0.1.0",
+  "description": "The Circle — a battle-royale countdown overlay for OBS",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test/ring.test.mjs",
+    "build:style": "node scripts/build-style.mjs",
+    "start": "node server/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "luxon": "^3.7.2",
+    "maplibre-gl": "^6.1.0",
+    "tz-lookup": "^6.1.25"
+  }
+}
