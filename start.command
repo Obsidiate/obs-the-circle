@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Circle — start this before OBS. Leave the window open while you stream.
+# The Circle — double-click me on macOS. Start before OBS; leave the window open.
 cd "$(dirname "$0")" || exit 1
 
 if ! command -v node >/dev/null 2>&1; then
@@ -7,7 +7,7 @@ if ! command -v node >/dev/null 2>&1; then
   echo "  Node.js isn't installed — it's the only thing The Circle needs."
   echo ""
   echo "  Get the LTS installer from   https://nodejs.org"
-  echo "  then run this file again."
+  echo "  then double-click this file again."
   echo ""
   read -r -p "  Press Enter to close."
   exit 1

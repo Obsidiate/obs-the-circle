@@ -4,3 +4,4 @@ cache/
 .shots/
 *.log
 .DS_Store
+release/

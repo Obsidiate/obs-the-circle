@@ -7,6 +7,7 @@
  * and EventSource reconnects on its own with no dependency to install.
  */
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -183,6 +184,23 @@ const server = createServer(async (req, res) => {
   }
 });
 
+/**
+ * Open the control panel in the default browser on start.
+ *
+ * Best-effort and deliberately silent on failure — a headless box or a locked-down
+ * desktop should still get a running server, not a crash. Set NO_OPEN=1 to skip.
+ */
+function openBrowser(url) {
+  if (process.env.NO_OPEN) return;
+  const cmd = process.platform === 'darwin' ? 'open'
+    : process.platform === 'win32' ? 'cmd'
+      : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  try {
+    spawn(cmd, args, { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
+  } catch { /* no browser available; the URLs are printed above anyway */ }
+}
+
 function lanAddress() {
   for (const list of Object.values(networkInterfaces())) {
     for (const ni of list || []) {
@@ -191,6 +209,20 @@ function lanAddress() {
   }
   return null;
 }
+
+// The most likely first-run failure is a second copy already running. Say so plainly
+// instead of dumping an EADDRINUSE stack trace at someone who just wants an overlay.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error('');
+    console.error(`  Port ${PORT} is already in use.`);
+    console.error('  The Circle may already be running — check for another window,');
+    console.error(`  or start it on a different port with:  PORT=7334 npm start`);
+    console.error('');
+    process.exit(1);
+  }
+  throw err;
+});
 
 server.listen(PORT, HOST, () => {
   const lan = lanAddress();
@@ -207,6 +239,8 @@ server.listen(PORT, HOST, () => {
   console.log(`  │  Target   ${s.config.target.name}`);
   console.log(`  │  Go live  ${formatLocal(s.config.goLiveMs, s.config.target.tz)}`);
   console.log('  │');
+  console.log('  │  Leave this window open while you stream.');
   console.log('  └──────────────────────────────────────────────────────────');
   console.log('');
+  openBrowser(`http://localhost:${PORT}/control`);
 });
