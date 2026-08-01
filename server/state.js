@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_CONFIG, makeTransition, ringAt } from '../public/js/ring.js';
 import { nextOccurrence, zoneFor } from './time.js';
+import { reverseArea } from './geocode.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const STATE_FILE = join(ROOT, 'state.json');
@@ -105,9 +106,31 @@ export function resetTime() {
   return applyPatch({ goLiveMs: s.config.originalGoLiveMs }, 'absorb');
 }
 
-/** Move the target, resolving its timezone from the coordinate. */
-export function setTarget(target, forceMode = null) {
-  return applyPatch({ target: { ...target, tz: target.tz || zoneFor(target.lat, target.lon) } }, forceMode);
+/**
+ * Move the target, resolving its timezone and its administrative areas from the
+ * coordinate. The area is what the overlay actually displays — the target's own name never
+ * reaches the screen.
+ *
+ * Applied in two steps on purpose: the move lands immediately so the operator sees the
+ * circle react, and the reverse lookup patches the label in when it returns rather than
+ * blocking on the network mid-show.
+ */
+export async function setTarget(target, forceMode = null) {
+  const tz = target.tz || zoneFor(target.lat, target.lon);
+  applyPatch({ target: { ...target, tz, area: {} } }, forceMode);
+
+  try {
+    const area = await reverseArea(target.lat, target.lon);
+    const s = getState();
+    // Only if the operator has not moved the target again while we waited.
+    if (s.config.target.lat === target.lat && s.config.target.lon === target.lon) {
+      s.config = { ...s.config, target: { ...s.config.target, area } };
+      persist();
+    }
+  } catch (err) {
+    console.warn('[state] reverse geocode failed, overlay will show no place label:', err.message);
+  }
+  return getState();
 }
 
 /** What the classifier *would* do, so the control panel can warn before you commit. */

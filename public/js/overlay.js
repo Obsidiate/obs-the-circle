@@ -6,7 +6,7 @@
  * mid-stream refresh or an OBS restart resumes exactly where it left off.
  */
 import { Map as MaplibreMap } from '/vendor/maplibre-gl.mjs';
-import { ringAt, zoomFor, formatCountdown, formatRadius, offsetLatLon } from './ring.js';
+import { ringAt, zoomFor, formatCountdown, formatRadius, offsetLatLon, areaLabel } from './ring.js';
 import { connect, now, layout, digitize } from './client-state.js';
 
 const stage = document.getElementById('stage');
@@ -98,8 +98,12 @@ function resize() {
   fx.width = Math.max(2, Math.round(veil.width / SCALE));
   fx.height = Math.max(2, Math.round(veil.height / SCALE));
   fxImage = fxctx.createImageData(fx.width, fx.height);
+  smooth = new Float32Array(fx.width * fx.height);
 }
 window.addEventListener('resize', resize);
+
+/** Previous frame's luma, for temporal smoothing. See paintStatic. */
+let smooth = null;
 
 // xorshift rather than Math.random: ~2x faster, and this runs per-pixel per-frame.
 let rndState = 0x9e3779b9;
@@ -110,30 +114,58 @@ function rnd8() {
   return (rndState >>> 24) & 0xff;
 }
 
-/** Paints one frame of cloudy static into the low-res buffer. */
-function paintStatic(tMs, intensity) {
+const M = CLOUD_N - 1;
+
+/**
+ * Paints one frame of slow, swirling fog into the low-res buffer.
+ *
+ * Three things make it read as drifting fog rather than TV static:
+ *  - domain warping, where one sample of the cloud displaces the lookup of another. This
+ *    is what produces curling, organic motion instead of a texture sliding in a straight
+ *    line.
+ *  - a small grain term rather than a dominant one; per-pixel white noise at 30fps is
+ *    agitating to look at, and this sits on screen for hours.
+ *  - temporal smoothing against the previous frame, which removes the strobe entirely and
+ *    leaves everything flowing.
+ */
+function paintStatic(tMs, opacity) {
   const { width: w, height: h } = fx;
   const data = fxImage.data;
+  const t = tMs / 1000;
 
-  // Slow drift, so the cloud breathes instead of sitting still.
-  const dx = Math.round((tMs / 90) % CLOUD_N);
-  const dy = Math.round((tMs / 140) % CLOUD_N);
+  // Two drifts at different rates and directions so nothing ever visibly repeats.
+  const dx = Math.round(t * 3.1) & M;
+  const dy = Math.round(t * 2.0) & M;
+  const wx = Math.round(t * 1.3) & M;
+  const wy = Math.round(-t * 1.7) & M;
+  const WARP = 0.5;
 
-  for (let y = 0, i = 0; y < h; y++) {
-    const cy = ((y + dy) & (CLOUD_N - 1)) * CLOUD_N;
-    for (let x = 0; x < w; x++, i += 4) {
-      const c = cloud ? cloud[cy + ((x + dx) & (CLOUD_N - 1))] : 128;
-      const grain = rnd8();
-      // Near-ink with a hard grain: this is dead signal, not fog. The wall must stay
-      // DARKER than the map inside it, or the eye goes to the thing that is hiding the
-      // answer instead of the thing revealing it. Low base + a wide grain term gives a
-      // dark wall that still visibly crawls.
-      const v = 4 + (c >> 4) + (grain >> 3);
-      data[i] = v * 0.78;
-      data[i + 1] = v * 0.92;
-      data[i + 2] = v * 1.2;
-      // Opaque. The wall's job is to hide where you are, so it must not be see-through.
-      data[i + 3] = 255 * intensity;
+  for (let y = 0, i = 0, p = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, i += 4, p++) {
+      let c = 128;
+      if (cloud) {
+        // Coarse lookup (x>>1) gives a large, slow flow field; feeding it back in as an
+        // offset is the domain warp that makes the fog curl.
+        const u = ((x >> 1) + wx) & M;
+        const v = ((y >> 1) + wy) & M;
+        const ox = (cloud[v * CLOUD_N + u] - 128) * WARP;
+        const oy = (cloud[((v + 137) & M) * CLOUD_N + ((u + 251) & M)] - 128) * WARP;
+        c = cloud[(((y + dy + oy) | 0) & M) * CLOUD_N + (((x + dx + ox) | 0) & M)];
+      }
+
+      // Fog is luminous, not dark. At 40% over an already-dark map a near-black veil just
+      // dims the frame and the swirl becomes invisible; lifting the luma is what lets the
+      // motion actually read as moving fog.
+      const target = 22 + (c >> 2) + (rnd8() >> 5);
+      const s = smooth[p] * 0.76 + target * 0.24;
+      smooth[p] = s;
+
+      data[i] = s * 0.74;
+      data[i + 1] = s * 0.9;
+      data[i + 2] = s * 1.25;
+      // Translucent, so the surrounding geography still reads as reference. Density
+      // varies with the cloud, which stops it looking like a flat sheet of tint.
+      data[i + 3] = opacity * (0.72 + (c / 255) * 0.28) * 255;
     }
   }
   fxctx.putImageData(fxImage, 0, 0);
@@ -152,7 +184,7 @@ function drawVeil(state, tMs) {
   const H = veil.height;
   if (!W || !H) return;
 
-  paintStatic(tMs, 1);
+  paintStatic(tMs, state.veilOpacity);
 
   vctx.setTransform(1, 0, 0, 1, 0, 0);
   vctx.clearRect(0, 0, W, H);
@@ -182,8 +214,7 @@ function drawVeil(state, tMs) {
   vctx.arc(cx, cy, r, 0, Math.PI * 2);
   vctx.fill();
 
-  // Cyan bloom just inside the wall, then the boundary stroke itself — the same round-cap,
-  // glowing cyan "ink" treatment as the underline on the website.
+  // Cyan bloom just inside the wall.
   vctx.globalCompositeOperation = 'lighter';
   const bloom = vctx.createRadialGradient(cx, cy, r * 0.86, cx, cy, r * 1.06);
   bloom.addColorStop(0, 'rgba(98,189,221,0)');
@@ -194,16 +225,95 @@ function drawVeil(state, tMs) {
   vctx.arc(cx, cy, r * 1.06, 0, Math.PI * 2);
   vctx.fill();
 
+  drawBoundary(cx, cy, r, tMs / 1000, state.phase === 'live');
+  drawMotes(cx, cy, r, tMs / 1000);
+
   vctx.globalCompositeOperation = 'source-over';
-  const pulse = state.phase === 'live' ? 0.72 + 0.28 * Math.sin(tMs / 320) : 1;
-  vctx.lineWidth = Math.max(1.5, 2.4 * dpr);
-  vctx.strokeStyle = `rgba(139,207,235,${0.92 * pulse})`;
-  vctx.shadowBlur = 26 * dpr;
-  vctx.shadowColor = 'rgba(98,189,221,0.95)';
-  vctx.beginPath();
-  vctx.arc(cx, cy, r, 0, Math.PI * 2);
-  vctx.stroke();
   vctx.shadowBlur = 0;
+}
+
+/* ---------------------------------------------------------------- *
+ * The boundary
+ *
+ * Three offset ribbons rather than one clean arc. Each undulates on its own slow phase,
+ * so they cross and separate as they travel — that layering is what makes the edge writhe
+ * instead of merely wobble. Frequencies are deliberately low: this sits on screen for
+ * hours before a stream, so it has to stay calm to look at.
+ * ---------------------------------------------------------------- */
+
+const RIBBONS = [
+  { amp: 0.030, width: 7.0, alpha: 0.13, phase: 0.0, blur: 30 },
+  { amp: 0.014, width: 2.6, alpha: 0.85, phase: 2.1, blur: 22 },
+  { amp: 0.008, width: 1.3, alpha: 0.95, phase: 4.3, blur: 10 },
+];
+
+const SEGMENTS = 220;
+
+/** Radial displacement of the boundary at an angle, as a fraction of the radius. */
+function writhe(theta, t, phase) {
+  return (
+    0.55 * Math.sin(3 * theta + t * 0.19 + phase) +
+    0.30 * Math.sin(5 * theta - t * 0.14 + phase * 1.3) +
+    0.15 * Math.sin(9 * theta + t * 0.09 + phase * 0.7)
+  );
+}
+
+function drawBoundary(cx, cy, r, t, isLive) {
+  const pulse = isLive ? 0.74 + 0.26 * Math.sin(t * 2.4) : 1;
+  vctx.globalCompositeOperation = 'lighter';
+  vctx.lineJoin = 'round';
+  vctx.lineCap = 'round';
+
+  for (const rib of RIBBONS) {
+    vctx.beginPath();
+    for (let i = 0; i <= SEGMENTS; i++) {
+      const th = (i / SEGMENTS) * Math.PI * 2;
+      const rr = r * (1 + rib.amp * writhe(th, t, rib.phase));
+      const x = cx + rr * Math.cos(th);
+      const y = cy + rr * Math.sin(th);
+      if (i === 0) vctx.moveTo(x, y);
+      else vctx.lineTo(x, y);
+    }
+    vctx.closePath();
+    vctx.lineWidth = Math.max(1, rib.width * dpr);
+    vctx.strokeStyle = `rgba(139,207,235,${rib.alpha * pulse})`;
+    vctx.shadowBlur = rib.blur * dpr;
+    vctx.shadowColor = 'rgba(98,189,221,0.9)';
+    vctx.stroke();
+  }
+  vctx.shadowBlur = 0;
+}
+
+/**
+ * Motes drifting along the boundary.
+ *
+ * Position and brightness are pure functions of (index, time) — no particle state is
+ * stored, so a refreshed browser source produces the identical field rather than
+ * re-seeding a visibly different one. Distributed by the golden angle so they never band.
+ */
+const MOTES = 110;
+const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+
+function drawMotes(cx, cy, r, t) {
+  vctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < MOTES; i++) {
+    // Varied orbital speeds, some retrograde, so the field never rotates as one body.
+    const speed = 0.020 + 0.016 * Math.sin(i * 1.7);
+    const th = i * GOLDEN + t * speed;
+
+    // Drift in and out across the wall, on a slower cycle than the orbit.
+    const band = Math.sin(t * 0.23 + i * 2.6) * 0.5 + Math.sin(t * 0.15 + i * 0.9) * 0.5;
+    const rr = r * (1 + 0.055 * band);
+
+    const twinkle = 0.5 + 0.5 * Math.sin(t * 0.7 + i * 2.1);
+    const a = 0.1 + 0.62 * twinkle * twinkle;
+    const size = (0.7 + 1.5 * twinkle) * dpr;
+
+    vctx.beginPath();
+    vctx.arc(cx + rr * Math.cos(th), cy + rr * Math.sin(th), size, 0, Math.PI * 2);
+    vctx.fillStyle = `rgba(${150 + 60 * twinkle | 0},${215 + 30 * twinkle | 0},245,${a})`;
+    vctx.fill();
+  }
 }
 
 /* ---------------------------------------------------------------- *
@@ -226,9 +336,11 @@ function drawHud(cfg, state) {
   el.eyebrow.className = 'eyebrow ' + (overdue ? 'alert' : delayed ? 'warn' : '');
   el.eyebrow.textContent = overdue ? 'Running late' : state.holding ? 'Circle holding' : 'Until live';
 
-  const place = (cfg.target.name || '').split(',')[0];
+  // Deliberately the area ladder, never cfg.target.name — see areaLabel().
+  const place = areaLabel(state.radiusM, cfg.target.area);
   el.sub.innerHTML =
-    `${place}<span class="sep">·</span><span class="scale">${formatRadius(state.radiusM)}</span>` +
+    (place ? `${place}<span class="sep">·</span>` : '') +
+    `<span class="scale">${formatRadius(state.radiusM)}</span>` +
     `<span class="sep">·</span>${fmtLocal(cfg.goLiveMs, cfg.target.tz)}`;
 
   if (delayed) {
@@ -275,14 +387,14 @@ function frame(ts) {
     const reserve = h * (layout === 'panel' ? 0.34 : 0.28);
     map.jumpTo({
       center: [state.centre.lon, state.centre.lat],
-      zoom: zoomFor(state.radiusM, state.centre.lat, w, h - reserve, 2.12),
+      zoom: zoomFor(state.radiusM, state.centre.lat, w, h - reserve, 2.12, live.config.maxZoom ?? 16),
       padding: { top: 0, left: 0, right: 0, bottom: reserve },
     });
   }
 
   if (ts - lastStatic >= STATIC_INTERVAL) {
     lastStatic = ts;
-    drawVeil(state, t);
+    drawVeil({ ...state, veilOpacity: live.config.veilOpacity ?? 0.4 }, t);
   }
 
   drawHud(live.config, state);

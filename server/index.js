@@ -151,7 +151,7 @@ const server = createServer(async (req, res) => {
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
           return json(res, 400, { error: 'lat/lon required' });
         }
-        setTarget({ name, lat, lon, tz: body.tz || zoneFor(lat, lon) }, body.forceMode || null);
+        await setTarget({ name, lat, lon, tz: body.tz || zoneFor(lat, lon) }, body.forceMode || null);
         return json(res, 200, payload());
       }
 

@@ -1,9 +1,20 @@
 # The Circle
 
-A battle-royale ring closing in on tonight's location, as an OBS overlay. Dark map,
-shrinking wall of static, countdown to go live.
+A battle-royale circle closing in on tonight's location, as an OBS overlay. Dark map,
+drifting fog, countdown to go live — a "find the streamer" treasure hunt for your chat.
 
-![The Circle mid-run](docs/effect.jpg)
+![Country scale](docs/effect.jpg)
+
+It opens country-wide and narrows over the hours before you go live, naming one rung at a
+time — **country → state → city → suburb**, and never anything more specific. Street names
+are stripped from the map and the venue's own name is never shown.
+
+![City scale](docs/city.jpg)
+
+The camera stops at roughly a city block, so viewers get the neighbourhood and have to work
+out the rest.
+
+![Final approach, running late](docs/late.jpg)
 
 ## Setup
 
@@ -23,17 +34,13 @@ dock that lives inside the OBS window.
 
 ## Control panel
 
-<img src="docs/control.jpg" width="380" alt="Control panel">
-
-Search a place, set a go-live time in *that place's* timezone, and the circle closes in
-over the hours before — starting country-wide, drifting off-centre so nobody can read your
-location off the map early, and homing in over the last stretch.
+<img src="docs/control.jpg" width="360" alt="Control panel">
 
 **Running late?** Hit +5 through +60. The circle **holds** where it is instead of jumping
 backwards, then resumes closing once the new schedule catches up. Past go-live the clock
 keeps counting *negative*, so it's obvious you're behind rather than frozen.
 
-![Running late](docs/late.jpg)
+Move the location and it eases back out to country scale and starts again.
 
 ## Handy
 
@@ -41,7 +48,8 @@ keeps counting *negative*, so it's obvious you're behind rather than frozen.
   from the location itself.
 - `?layout=panel` gives a compact corner widget instead of a full screen.
 - `?at=<iso>&speed=600` fast-runs the whole sequence in seconds, for testing.
-- `npm test` checks the schedule maths (monotonic closure, the delay hold, determinism).
+- `npm test` checks the schedule maths — monotonic closure, the delay hold, the zoom floor,
+  and that the venue name never leaks at any radius.
 
 Everything renders from `(config, wall clock)` with no stored animation state, so
 refreshing the source or restarting OBS mid-stream picks up exactly where it left off.

@@ -1,4 +1,4 @@
-import { ringAt, scheduleAt, shape, makeTransition, DEFAULT_CONFIG, distanceM, formatCountdown, formatRadius, zoomFor }
+import { ringAt, scheduleAt, shape, makeTransition, DEFAULT_CONFIG, distanceM, formatCountdown, formatRadius, zoomFor, areaLabel }
   from '../public/js/ring.js';
 
 let fails = 0;
@@ -117,6 +117,37 @@ const zStart = zoomFor(1_500_000, -37.8, 1920, 1080);
 const zEnd = zoomFor(120, -37.8, 1920, 1080);
 ok(zStart > 2 && zStart < 6, `country zoom ~3-5, got ${zStart.toFixed(2)}`);
 ok(zEnd > 14 && zEnd < 18, `lookout zoom ~15-17, got ${zEnd.toFixed(2)}`);
+
+
+// 14. treasure-hunt floor: the camera must stop closing in at maxZoom
+const zCapped = zoomFor(cfg.endRadiusM, -37.8, 1920, 1080, 2.12, cfg.maxZoom);
+ok(zCapped === cfg.maxZoom, `final zoom must clamp to maxZoom (${cfg.maxZoom}), got ${zCapped}`);
+ok(zoomFor(1, -37.8, 1920, 1080, 2.12, 16) === 16, 'even an absurd radius cannot exceed maxZoom');
+ok(zoomFor(1_500_000, -37.8, 1920, 1080, 2.12, 16) < 6, 'country scale unaffected by the cap');
+// and the cap must not stop the circle itself from shrinking
+ok(scheduleAt(cfg, 1).radiusM === cfg.endRadiusM, 'circle still reaches endRadius under the zoom cap');
+ok(cfg.endRadiusM >= 100, 'endRadius stays block-scale, not doorstep-scale');
+
+
+// 15. the area ladder: country -> state -> city -> suburb+city, and never the venue name
+const AREA = DEFAULT_CONFIG.target.area;
+ok(areaLabel(1_500_000, AREA) === 'Australia', 'country at country scale');
+ok(areaLabel(400_000, AREA) === 'Victoria', 'state next');
+ok(areaLabel(60_000, AREA) === 'Melbourne', 'city next');
+ok(areaLabel(250, AREA) === 'Port Melbourne · Melbourne', 'suburb + city is the floor');
+// the ladder must be monotonic: never show a finer rung at a wider radius
+const rungs = [1_500_000, 400_000, 60_000, 250].map((r) => areaLabel(r, AREA));
+ok(new Set(rungs).size === 4, 'each scale gets a distinct rung');
+// the venue name must never appear at any radius
+let leaked = 0;
+for (let r = 100; r < 2_000_000; r = Math.ceil(r * 1.15)) {
+  if (areaLabel(r, AREA).includes('Sandridge')) leaked++;
+}
+ok(leaked === 0, `the target's own name must never be shown (leaked at ${leaked} radii)`);
+// graceful when a place has no suburb or state
+ok(areaLabel(250, { city: 'Reykjavik', country: 'Iceland' }) === 'Reykjavik', 'falls back when no suburb');
+ok(areaLabel(1_500_000, { city: 'Reykjavik', country: 'Iceland' }) === 'Iceland', 'falls back to country');
+ok(areaLabel(250, {}) === '', 'empty area yields no label rather than undefined');
 
 console.log(`\nzoom range: ${zStart.toFixed(2)} -> ${zEnd.toFixed(2)}`);
 console.log(`max drift fraction of radius: ${maxFrac.toFixed(3)}`);

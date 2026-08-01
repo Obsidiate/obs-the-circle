@@ -134,6 +134,33 @@ delete style.sources.ne2_shaded;
 style.layers = style.layers.filter((l) => l.source !== 'ne2_shaded');
 
 /**
+ * Label discipline — the whole point of the overlay is that the viewer works the location
+ * out, so the map must never simply print it.
+ *
+ * Street names are the outright giveaway ("Webb Trail" names the lookout), so every
+ * transportation_name layer goes, shields included. Water and aerodrome names are dropped
+ * as clutter. What survives is a ladder that matches the closing camera: country at
+ * continent scale, then state, then city, and suburb as the floor.
+ */
+const DROP_SOURCE_LAYERS = new Set([
+  'transportation_name', // street names and route shields
+  'aerodrome_label',
+  'water_name',
+]);
+style.layers = style.layers.filter(
+  (l) => !DROP_SOURCE_LAYERS.has(l['source-layer']) && l.id !== 'waterway_line_label',
+);
+
+// `label_other` is a catch-all for every place class the named layers miss — suburb, but
+// also neighbourhood, quarter, hamlet and isolated_dwelling. Pin it to suburb only, and
+// hold it back until the camera is close enough for it to be the useful rung.
+const other = style.layers.find((l) => l.id === 'label_other');
+if (other) {
+  other.filter = ['==', ['get', 'class'], 'suburb'];
+  other.minzoom = 11;
+}
+
+/**
  * Explicit palette rather than blind inversion.
  *
  * Inverting positron wholesale does the wrong thing to roads: on a light basemap the land

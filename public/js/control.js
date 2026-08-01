@@ -93,7 +93,15 @@ function fillForm(cfg) {
   $('endR').value = cfg.endRadiusM;
   $('jitter').value = cfg.jitter;
   $('drift').value = cfg.drift;
+  $('maxZoom').value = cfg.maxZoom ?? 16;
+  $('veil').value = cfg.veilOpacity ?? 0.4;
   syncLabels();
+}
+
+/** Rough ground span the camera shows at a zoom, so the slider means something. */
+function zoomSpan(z, lat) {
+  const m = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / Math.pow(2, z) * 900;
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km across` : `${Math.round(m / 10) * 10} m across`;
 }
 
 function syncLabels() {
@@ -103,6 +111,9 @@ function syncLabels() {
   $('endR-val').textContent = `${$('endR').value} m`;
   $('jitter-val').textContent = `${Math.round($('jitter').value * 100)}%`;
   $('drift-val').textContent = `${Math.round($('drift').value * 100)}%`;
+  const lat = live?.config.target.lat ?? -37.8;
+  $('maxZoom-val').textContent = `z${$('maxZoom').value} · ${zoomSpan(Number($('maxZoom').value), lat)}`;
+  $('veil-val').textContent = `${Math.round($('veil').value * 100)}%`;
 }
 
 /* ---------------- actions ---------------- */
@@ -179,7 +190,7 @@ $('q').onkeydown = (e) => {
 
 /* ---- advanced ---- */
 
-for (const id of ['window', 'startR', 'endR', 'jitter', 'drift']) {
+for (const id of ['window', 'startR', 'endR', 'jitter', 'drift', 'maxZoom', 'veil']) {
   $(id).oninput = syncLabels;
   $(id).onchange = guard(async () => {
     await post('/api/config', {
@@ -189,6 +200,8 @@ for (const id of ['window', 'startR', 'endR', 'jitter', 'drift']) {
         endRadiusM: Number($('endR').value),
         jitter: Number($('jitter').value),
         drift: Number($('drift').value),
+        maxZoom: Number($('maxZoom').value),
+        veilOpacity: Number($('veil').value),
       },
     });
     toast('Updated');

@@ -89,3 +89,43 @@ export function geocode(query) {
   gate = run.catch(() => {});
   return run;
 }
+
+/**
+ * Reverse-geocode to administrative areas: {suburb, city, state, country}.
+ *
+ * The overlay never prints the target's own name — "Sandridge Lookout" would simply hand
+ * the answer over. It shows a rung of this ladder instead, chosen by how far the circle
+ * has closed. zoom=14 asks Nominatim for suburb-level granularity rather than the exact
+ * feature.
+ */
+export function reverseArea(lat, lon) {
+  const key = `rev:${lat.toFixed(4)},${lon.toFixed(4)}`;
+  const store = loadCache();
+  if (store[key]) return Promise.resolve(store[key]);
+
+  const run = gate.then(async () => {
+    if (store[key]) return store[key];
+
+    const wait = MIN_INTERVAL_MS - (Date.now() - lastRequestAt);
+    if (wait > 0) await sleep(wait);
+    lastRequestAt = Date.now();
+
+    const url = `${ENDPOINT.replace('/search', '/reverse')}?lat=${lat}&lon=${lon}&format=json&zoom=14&addressdetails=1`;
+    const res = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Language': 'en' } });
+    if (!res.ok) throw new Error(`Nominatim reverse ${res.status}`);
+
+    const a = (await res.json()).address || {};
+    const area = {
+      suburb: a.suburb || a.neighbourhood || a.quarter || a.village || a.town || null,
+      city: a.city || a.town || a.municipality || a.county || null,
+      state: a.state || a.province || a.region || null,
+      country: a.country || null,
+    };
+    store[key] = area;
+    saveCache();
+    return area;
+  });
+
+  gate = run.catch(() => {});
+  return run;
+}

@@ -29,14 +29,23 @@ export const DEFAULT_CONFIG = {
     lat: -37.847337,
     lon: 144.9169414,
     tz: 'Australia/Melbourne',
+    // Shown on the overlay in place of `name`, one rung at a time. See areaLabel().
+    area: { suburb: 'Port Melbourne', city: 'Melbourne', state: 'Victoria', country: 'Australia' },
   },
   goLiveMs: 0,
   originalGoLiveMs: 0,
   windowMinutes: 360,
   startRadiusM: 1_500_000,
-  endRadiusM: 120,
+  // Roughly one city block in each direction. This is a treasure hunt, not a pin drop —
+  // the circle should land you on the block and leave the rest to the viewer.
+  endRadiusM: 250,
   jitter: 0.55,
   drift: 0.45,
+  // Hard floor on how far the camera may close in. Paired with the label rules in the map
+  // style, this is what stops the overlay from ever handing over a doorstep.
+  maxZoom: 16,
+  // The wall is translucent so the surrounding geography stays readable as reference.
+  veilOpacity: 0.4,
 };
 
 /* ------------------------------------------------------------------ *
@@ -221,12 +230,19 @@ export function classify(oldCfg, before, newCfg) {
  * Presentation helpers (still pure)
  * ------------------------------------------------------------------ */
 
-/** Web-mercator zoom that fits a circle of radiusM into the smaller viewport axis. */
-export function zoomFor(radiusM, lat, width, height, padding = 2.6) {
+/**
+ * Web-mercator zoom that fits a circle of radiusM into the smaller viewport axis.
+ *
+ * `maxZoom` is the treasure-hunt floor: once the camera hits it the view stops closing in
+ * and the circle simply shrinks within a fixed neighbourhood view. Without it the final
+ * minutes would frame individual buildings and footpaths, which gives the location away
+ * outright.
+ */
+export function zoomFor(radiusM, lat, width, height, padding = 2.6, maxZoom = 19) {
   const minAxis = Math.max(64, Math.min(width, height));
   const mpp = (radiusM * padding * 2) / minAxis;
   const worldMpp = 156543.03392 * Math.cos((lat * Math.PI) / 180);
-  return Math.max(1, Math.min(19, Math.log2(worldMpp / mpp)));
+  return Math.max(1, Math.min(maxZoom, Math.log2(worldMpp / mpp)));
 }
 
 /** "-00:04:12" past go-live, "02:14:37" before it. Always signed the same way a clock is. */
@@ -239,6 +255,24 @@ export function formatCountdown(ms) {
   s -= m * 60;
   const pad = (n) => String(n).padStart(2, '0');
   return `${neg ? '−' : ''}${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+/**
+ * How much of the location to name, given how far the circle has closed.
+ *
+ * The overlay must never print the target itself — naming "Sandridge Lookout" ends the
+ * hunt on the first frame. Instead it climbs a ladder in step with the camera: country,
+ * then state, then city, and suburb + city as the floor. Each rung falls back to the one
+ * above it when a place has no such division.
+ */
+export function areaLabel(radiusM, area = {}) {
+  const { suburb, city, state, country } = area;
+  const rungs =
+    radiusM > 500_000 ? [country, state, city]
+    : radiusM > 100_000 ? [state, country, city]
+    : radiusM > 5_000 ? [city, state, country]
+    : [[suburb, city].filter(Boolean).join(' · '), city, state, country];
+  return rungs.find((r) => r) || '';
 }
 
 /** "1,500 km" / "820 m" — the scale readout under the ring. */
