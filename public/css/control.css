@@ -28,6 +28,15 @@ h2 {
   margin: 22px 0 9px;
 }
 
+.group-label {
+  font-size: .64rem;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin: 0 0 7px;
+}
+
 .card {
   border: 1px solid var(--line);
   background: var(--field);

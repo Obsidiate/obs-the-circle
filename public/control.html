@@ -20,8 +20,25 @@
   <div id="bar"><i></i></div>
 </div>
 
+<h2>Zoom</h2>
+<div class="card">
+  <div class="field">
+    <label for="startR">Start zoomed out to — <span id="startR-val"></span></label>
+    <input type="range" id="startR" min="50" max="3000" step="10">
+  </div>
+  <div class="field">
+    <label for="hold">Fully zoomed in — <span id="hold-val"></span></label>
+    <input type="range" id="hold" min="0" max="120" step="1">
+  </div>
+  <p class="hint">
+    The circle finishes closing this long before go-live, then holds on the block until
+    you’re live. Zero means it lands right at go-live.
+  </p>
+</div>
+
 <h2>Running late?</h2>
 <div class="card">
+  <div class="group-label">Push back</div>
   <div class="grid" id="delays">
     <button class="delay-btn" data-min="5">+5 min</button>
     <button class="delay-btn" data-min="10">+10 min</button>
@@ -30,16 +47,24 @@
     <button class="delay-btn" data-min="45">+45 min</button>
     <button class="delay-btn" data-min="60">+60 min</button>
   </div>
-  <div class="row" style="margin-top:9px">
-    <input class="grow" type="number" id="custom-min" placeholder="Custom minutes" step="1">
+  <div class="group-label" style="margin-top:11px">Bring forward</div>
+  <div class="grid" id="pulls">
+    <button class="delay-btn" data-min="-5">−5 min</button>
+    <button class="delay-btn" data-min="-10">−10 min</button>
+    <button class="delay-btn" data-min="-15">−15 min</button>
+    <button class="delay-btn" data-min="-30">−30 min</button>
+    <button class="delay-btn" data-min="-45">−45 min</button>
+    <button class="delay-btn" data-min="-60">−60 min</button>
+  </div>
+  <div class="row" style="margin-top:11px">
+    <input class="grow" type="number" id="custom-min" placeholder="Custom minutes (− to bring forward)" step="1">
     <button id="custom-go">Apply</button>
   </div>
   <div class="row" style="margin-top:9px">
-    <button class="ghost grow" id="pull-5">Bring forward 5 min</button>
     <button class="ghost grow" id="reset-time">Reset to original</button>
   </div>
   <p class="hint">
-    A delay never makes the circle jump backwards — it holds where it is until the new
+    Pushing back never makes the circle jump backwards — it holds where it is until the new
     schedule catches up, then carries on closing.
   </p>
 </div>
@@ -79,12 +104,8 @@
   <summary>Advanced</summary>
   <div class="card">
     <div class="field">
-      <label for="window">Closing window — <span id="window-val"></span></label>
+      <label for="window">Begin zooming at — <span id="window-val"></span></label>
       <input type="range" id="window" min="15" max="1440" step="15">
-    </div>
-    <div class="field">
-      <label for="startR">Start radius — <span id="startR-val"></span></label>
-      <input type="range" id="startR" min="50" max="3000" step="10">
     </div>
     <div class="field">
       <label for="endR">Final radius — <span id="endR-val"></span></label>
@@ -108,11 +129,11 @@
     </div>
     <div class="row" style="margin-top:12px">
       <button class="grow" id="reroll">Reroll pattern</button>
-      <button class="grow" id="restart">Restart from country scale</button>
+      <button class="grow" id="restart">Restart from assigned zoom-out</button>
     </div>
     <p class="hint">
-      Sliders apply on release. Big changes ease back out to country scale; small ones are
-      absorbed without breaking the run.
+      Sliders apply on release. Big changes ease back out to the start distance; small ones
+      are absorbed without breaking the run.
     </p>
   </div>
 </details>

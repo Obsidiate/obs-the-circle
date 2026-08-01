@@ -87,6 +87,22 @@ ok(resumed.radiusM < before.radiusM, 'must be shrinking again after the hold');
 const atChange = ringAt(delayed, tr, mid);
 ok(Math.abs(atChange.radiusM - before.radiusM) < 1e-6, 'no radius jump at the graft instant');
 
+// 8b. a LATE delay must hold the CENTRE put, not fling it out to country-scale drift.
+// The delayed schedule re-lands at an early fraction whose drift offset is enormous; while
+// the circle holds its (small) radius the centre must stay inside it, not leap across the map.
+const lateMs = start + (T0 - start) * 0.95;
+const beforeLate = ringAt(cfg, null, lateMs);
+const delayedLate = { ...cfg, goLiveMs: T0 + 45 * 60_000 };
+const trLate = makeTransition(cfg, null, delayedLate, lateMs);
+ok(trLate.mode === 'absorb', `late +45min should absorb, got ${trLate.mode}`);
+let maxCentreJump = 0;
+for (let ms = lateMs; ms < lateMs + 45 * 60_000; ms += 5000) {
+  const st = ringAt(delayedLate, trLate, ms);
+  maxCentreJump = Math.max(maxCentreJump, distanceM(st.centre, beforeLate.centre));
+}
+ok(maxCentreJump <= beforeLate.radiusM + 1,
+  `late delay must keep the centre within the held circle (jumped ${Math.round(maxCentreJump)}m vs held radius ${Math.round(beforeLate.radiusM)}m)`);
+
 // 9. big relocation -> reset, and expansion is permitted
 const moved = { ...cfg, target: { ...cfg.target, lat: -33.87, lon: 151.21, name: 'Sydney' } };
 const tr2 = makeTransition(cfg, null, moved, mid);
@@ -148,6 +164,30 @@ ok(leaked === 0, `the target's own name must never be shown (leaked at ${leaked}
 ok(areaLabel(250, { city: 'Reykjavik', country: 'Iceland' }) === 'Reykjavik', 'falls back when no suburb');
 ok(areaLabel(1_500_000, { city: 'Reykjavik', country: 'Iceland' }) === 'Iceland', 'falls back to country');
 ok(areaLabel(250, {}) === '', 'empty area yields no label rather than undefined');
+
+// 16. the hold: reach endRadius `holdMinutes` early, then sit there until go-live
+const HOLD = 10;
+const held10 = { ...cfg, holdMinutes: HOLD };
+const finishMs = T0 - HOLD * 60_000;
+ok(Math.abs(ringAt(held10, null, finishMs).radiusM - cfg.endRadiusM) < 0.5,
+  'hold: circle reaches endRadius at the finish line, holdMinutes before go-live');
+let holdGrew = 0, holdMoved = 0, holdFlagged = 0, holdN = 0;
+for (let ms = finishMs; ms <= T0; ms += 5000) {
+  const st = ringAt(held10, null, ms);
+  if (Math.abs(st.radiusM - cfg.endRadiusM) > 0.5) holdMoved++;
+  if (st.radiusM > cfg.endRadiusM + 1e-6) holdGrew++;
+  if (st.inHold) holdFlagged++;
+  holdN++;
+}
+ok(holdMoved === 0, `hold: radius must stay pinned at endRadius through the hold (${holdMoved}/${holdN} drifted)`);
+ok(holdGrew === 0, 'hold: must never grow during the hold');
+ok(holdFlagged > 0, `hold: inHold should be set while waiting (${holdFlagged}/${holdN})`);
+// the clock keeps counting to the real go-live, not the finish line
+ok(Math.abs(ringAt(held10, null, finishMs).msToGoLive - HOLD * 60_000) < 1,
+  'hold: countdown still targets go-live, so it reads holdMinutes remaining at the finish line');
+// holdMinutes=0 is the old behaviour: endRadius lands exactly at go-live, no hold flagged
+ok(Math.abs(ringAt(cfg, null, T0).radiusM - cfg.endRadiusM) < 0.01, 'hold=0: endRadius at go-live');
+ok(ringAt(cfg, null, T0 - 60_000).inHold === false, 'hold=0: never reports a hold');
 
 console.log(`\nzoom range: ${zStart.toFixed(2)} -> ${zEnd.toFixed(2)}`);
 console.log(`max drift fraction of radius: ${maxFrac.toFixed(3)}`);

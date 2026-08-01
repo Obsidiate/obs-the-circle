@@ -90,6 +90,7 @@ function fillForm(cfg) {
 
   $('window').value = cfg.windowMinutes;
   $('startR').value = Math.round(cfg.startRadiusM / 1000);
+  $('hold').value = cfg.holdMinutes ?? 0;
   $('endR').value = cfg.endRadiusM;
   $('jitter').value = cfg.jitter;
   $('drift').value = cfg.drift;
@@ -104,9 +105,16 @@ function zoomSpan(z, lat) {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km across` : `${Math.round(m / 10) * 10} m across`;
 }
 
+/** "6 h" / "45 min" from a minutes value. */
+function humanMins(m) {
+  return m >= 60 ? `${(m / 60).toFixed(m % 60 ? 1 : 0)} h` : `${m} min`;
+}
+
 function syncLabels() {
   const w = Number($('window').value);
-  $('window-val').textContent = w >= 60 ? `${(w / 60).toFixed(w % 60 ? 1 : 0)} h` : `${w} min`;
+  $('window-val').textContent = `${humanMins(w)} before go-live`;
+  const hold = Number($('hold').value);
+  $('hold-val').textContent = hold === 0 ? 'at go-live' : `${humanMins(hold)} before go-live`;
   $('startR-val').textContent = `${Number($('startR').value).toLocaleString()} km`;
   $('endR-val').textContent = `${$('endR').value} m`;
   $('jitter-val').textContent = `${Math.round($('jitter').value * 100)}%`;
@@ -120,8 +128,9 @@ function syncLabels() {
 
 for (const b of document.querySelectorAll('.delay-btn')) {
   b.onclick = guard(async () => {
-    await post('/api/delay', { minutes: Number(b.dataset.min) });
-    toast(`Pushed back ${b.dataset.min} minutes`);
+    const m = Number(b.dataset.min);
+    await post('/api/delay', { minutes: m });
+    toast(m >= 0 ? `Pushed back ${m} minutes` : `Brought forward ${-m} minutes`);
   });
 }
 
@@ -131,11 +140,6 @@ $('custom-go').onclick = guard(async () => {
   await post('/api/delay', { minutes: m });
   $('custom-min').value = '';
   toast(m > 0 ? `Pushed back ${m} minutes` : `Brought forward ${-m} minutes`);
-});
-
-$('pull-5').onclick = guard(async () => {
-  await post('/api/delay', { minutes: -5 });
-  toast('Brought forward 5 minutes');
 });
 
 $('reset-time').onclick = guard(async () => {
@@ -190,13 +194,14 @@ $('q').onkeydown = (e) => {
 
 /* ---- advanced ---- */
 
-for (const id of ['window', 'startR', 'endR', 'jitter', 'drift', 'maxZoom', 'veil']) {
+for (const id of ['window', 'startR', 'hold', 'endR', 'jitter', 'drift', 'maxZoom', 'veil']) {
   $(id).oninput = syncLabels;
   $(id).onchange = guard(async () => {
     await post('/api/config', {
       patch: {
         windowMinutes: Number($('window').value),
         startRadiusM: Number($('startR').value) * 1000,
+        holdMinutes: Number($('hold').value),
         endRadiusM: Number($('endR').value),
         jitter: Number($('jitter').value),
         drift: Number($('drift').value),

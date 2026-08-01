@@ -36,6 +36,10 @@ export const DEFAULT_CONFIG = {
   originalGoLiveMs: 0,
   windowMinutes: 360,
   startRadiusM: 1_500_000,
+  // Reach the final radius/zoom this many minutes BEFORE go-live, then hold on the block
+  // until the clock hits zero. 0 restores "arrive exactly at go-live". Kept below
+  // windowMinutes so there is always some closing to watch.
+  holdMinutes: 0,
   // Roughly one city block in each direction. This is a treasure hunt, not a pin drop —
   // the circle should land you on the block and leave the rest to the viewer.
   endRadiusM: 250,
@@ -147,7 +151,12 @@ export function scheduleAt(cfg, t) {
  */
 export function ringAt(cfg, transition, nowMs) {
   const startMs = ringStartMs(cfg);
-  const span = Math.max(1, cfg.goLiveMs - startMs);
+  // The close-in completes `holdMinutes` before go-live and then holds at the final
+  // radius/zoom until zero. Progress is measured against that earlier finish line, not
+  // go-live, so t reaches 1 during the hold and the schedule sits at endRadius.
+  const holdMs = Math.max(0, (cfg.holdMinutes ?? 0) * 60_000);
+  const fullMs = cfg.goLiveMs - holdMs;
+  const span = Math.max(1, fullMs - startMs);
   const tRaw = (nowMs - startMs) / span;
   const t = clamp01(tRaw);
 
@@ -173,11 +182,19 @@ export function ringAt(cfg, transition, nowMs) {
     // slightly, then resume creeping" behaviour, and it needs no expiry logic.
     if (transition.mode === 'absorb' && radiusM > transition.fromRadiusM) {
       radiusM = transition.fromRadiusM;
+      // Freeze the CENTRE too, not just the radius. The delayed schedule re-lands at an
+      // earlier fraction where the drift offset is huge (that far offset only makes sense at
+      // country scale); following it would fling the centre across the map while the zoom
+      // stays put. Holding at fromCentre keeps the circle where it actually is. By the time
+      // the hold releases the schedule has converged again, so this rejoins seamlessly.
+      centre = transition.fromCentre;
       holding = base.radiusM > transition.fromRadiusM;
     }
   }
 
   const msToGoLive = cfg.goLiveMs - nowMs;
+  // Between the finish line and go-live the circle is fully closed and simply waiting.
+  const inHold = holdMs > 0 && t >= 1 && msToGoLive > 0;
   const phase = nowMs < startMs ? 'pre' : msToGoLive > 0 ? 'closing' : 'live';
 
   return {
@@ -186,7 +203,8 @@ export function ringAt(cfg, transition, nowMs) {
     t,
     tRaw,
     phase,
-    holding,
+    holding: holding || inHold,
+    inHold,
     msToGoLive,
     delayMs: cfg.goLiveMs - cfg.originalGoLiveMs,
     base,

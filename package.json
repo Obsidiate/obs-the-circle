@@ -1,6 +1,6 @@
 {
   "name": "obs-the-circle",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The Circle — a battle-royale countdown overlay for OBS",
   "main": "index.js",
   "scripts": {

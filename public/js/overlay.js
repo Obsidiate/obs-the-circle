@@ -12,12 +12,20 @@ import { connect, now, layout, digitize } from './client-state.js';
 const stage = document.getElementById('stage');
 const veil = document.getElementById('veil');
 const vctx = veil.getContext('2d');
+const hud = document.getElementById('hud');
 const el = {
   eyebrow: document.getElementById('eyebrow'),
   clock: document.getElementById('clock'),
   sub: document.getElementById('sub'),
   delay: document.getElementById('delay'),
 };
+
+// Shared between the veil pass (which knows where the ring is) and the HUD pass (which
+// parks the countdown just beneath it). Device pixels.
+let ringGeom = null;
+// Top of the countdown block in device px; motes fade out before they reach it so nothing
+// dances over the text. Infinity until the HUD has been placed for the first time.
+let hudTopDev = Infinity;
 
 document.body.classList.add(layout);
 
@@ -34,6 +42,10 @@ const map = new MaplibreMap({
   attributionControl: false, // we render our own, see #attrib
   fadeDuration: 0,          // labels crossfading during a continuous zoom looks like a glitch
   refreshExpiredTiles: false,
+  // The close-in only ever zooms IN, so holding a deep cache means the tiles for the levels
+  // we are about to reach are already fetched and decoded — this is what stops the map
+  // popping in a step behind the zoom.
+  maxTileCacheSize: 1024,
 });
 
 // If tiles never arrive we still want ring + timer over brand ink, never a blank frame.
@@ -51,7 +63,7 @@ const CLOUD_N = 512;
 const CLOUD_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" width="${CLOUD_N}" height="${CLOUD_N}">` +
   '<filter id="c">' +
-  '<feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="4" stitchTiles="stitch"/>' +
+  '<feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="5" stitchTiles="stitch"/>' +
   '<feColorMatrix type="saturate" values="0"/>' +
   '</filter>' +
   '<rect width="100%" height="100%" filter="url(#c)"/></svg>';
@@ -138,7 +150,7 @@ function paintStatic(tMs, opacity) {
   const dy = Math.round(t * 2.0) & M;
   const wx = Math.round(t * 1.3) & M;
   const wy = Math.round(-t * 1.7) & M;
-  const WARP = 0.5;
+  const WARP = 0.85;
 
   for (let y = 0, i = 0, p = 0; y < h; y++) {
     for (let x = 0; x < w; x++, i += 4, p++) {
@@ -153,19 +165,24 @@ function paintStatic(tMs, opacity) {
         c = cloud[(((y + dy + oy) | 0) & M) * CLOUD_N + (((x + dx + ox) | 0) & M)];
       }
 
-      // Fog is luminous, not dark. At 40% over an already-dark map a near-black veil just
-      // dims the frame and the swirl becomes invisible; lifting the luma is what lets the
-      // motion actually read as moving fog.
-      const target = 22 + (c >> 2) + (rnd8() >> 5);
-      const s = smooth[p] * 0.76 + target * 0.24;
+      // Fog is luminous, not dark: lifting the luma lets the motion read as moving fog over
+      // an already-dark map. A ridged transform of the warped cloud (peaking where the noise
+      // crosses its midpoint) carves swirling vein-lines; squaring sharpens them, and a wide
+      // output range pushes the contrast between wisp and gap. Mixed back with the soft body
+      // so it stays lines *in* fog rather than bare filaments.
+      const n = c / 255;
+      const ridge = 1 - Math.abs(n * 2 - 1);
+      const mix = 0.5 * ridge * ridge + 0.5 * n;
+      const target = 10 + mix * 170 + (rnd8() >> 5);
+      const s = smooth[p] * 0.74 + target * 0.26;
       smooth[p] = s;
 
-      data[i] = s * 0.74;
+      data[i] = s * 0.7;
       data[i + 1] = s * 0.9;
-      data[i + 2] = s * 1.25;
-      // Translucent, so the surrounding geography still reads as reference. Density
-      // varies with the cloud, which stops it looking like a flat sheet of tint.
-      data[i + 3] = opacity * (0.72 + (c / 255) * 0.28) * 255;
+      data[i + 2] = s * 1.3;
+      // Translucent, so the surrounding geography still reads as reference. Density tracks the
+      // vein structure, which is what makes the brighter lines feel like banks of fog.
+      data[i + 3] = opacity * (0.55 + mix * 0.45) * 255;
     }
   }
   fxctx.putImageData(fxImage, 0, 0);
@@ -200,6 +217,7 @@ function drawVeil(state, tMs) {
   const cx = p.x * dpr;
   const cy = p.y * dpr;
   const r = Math.max(1, radiusPx(state.centre, state.radiusM));
+  ringGeom = { cx, cy, r };
 
   // Punch the safe zone out. The feathered inner stop is what makes the boundary look
   // like encroaching interference instead of a cookie-cutter hole.
@@ -226,7 +244,8 @@ function drawVeil(state, tMs) {
   vctx.fill();
 
   drawBoundary(cx, cy, r, tMs / 1000, state.phase === 'live');
-  drawMotes(cx, cy, r, tMs / 1000);
+  drawMotes(cx, cy, r, tMs / 1000);      // sparks spread through the fog
+  drawRingMotes(cx, cy, r, tMs / 1000);  // dense cluster orbiting the wall
 
   vctx.globalCompositeOperation = 'source-over';
   vctx.shadowBlur = 0;
@@ -285,33 +304,84 @@ function drawBoundary(cx, cy, r, t, isLive) {
 }
 
 /**
- * Motes drifting along the boundary.
+ * Blue particles dancing through the fog around the boundary.
  *
  * Position and brightness are pure functions of (index, time) — no particle state is
  * stored, so a refreshed browser source produces the identical field rather than
  * re-seeding a visibly different one. Distributed by the golden angle so they never band.
+ *
+ * They spread across a radial band that hugs the wall (thinning inward and outward into the
+ * fog) rather than sitting on a single line, and each rides two slow bobs so the whole field
+ * shimmers and drifts. Any particle approaching the countdown text fades out first — see
+ * hudTopDev — so nothing ever dances over the numbers.
  */
-const MOTES = 110;
+const MOTES = 460;
+const RING_MOTES = 220;
 const GOLDEN = Math.PI * (3 - Math.sqrt(5));
+const clamp01px = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+const fract = (n) => n - Math.floor(n);
 
 function drawMotes(cx, cy, r, t) {
+  const W = veil.width;
+  const H = veil.height;
   vctx.globalCompositeOperation = 'lighter';
+  const fade = 46 * dpr; // over how many px a spark dims as it nears the text
+  // How far the sparks spread into the fog on either side of the wall. Deliberately wide, so
+  // they fill the fog rather than tracing the ring like the boundary ribbons do.
+  const halo = r * 0.75 + 120 * dpr;
+
   for (let i = 0; i < MOTES; i++) {
-    // Varied orbital speeds, some retrograde, so the field never rotates as one body.
+    // A stable pseudo-random home across the whole frame, with a small bounded drift so the
+    // field breathes without ever teleporting. Pure in (i, t): a refreshed source is identical.
+    const hx = fract(Math.sin(i * 12.9898) * 43758.5453);
+    const hy = fract(Math.sin(i * 78.233) * 43758.5453);
+    const x = (hx + 0.03 * Math.sin(t * 0.13 + i * 1.7)) * W;
+    const y = (hy + 0.03 * Math.cos(t * 0.11 + i * 2.3)) * H;
+
+    // Inside the safe zone there is no fog, so no sparks live there.
+    const d = Math.hypot(x - cx, y - cy);
+    if (d < r * 0.99) continue;
+
+    // Brightest just outside the wall, fading out into the fog — this is what makes them read
+    // as suspended in the fog around the ring rather than a line drawn on it.
+    const haze = Math.exp(-(((d - r) / halo) ** 2));
+    const gate = clamp01px((hudTopDev - y) / fade); // keep clear of the countdown text
+    const twinkle = 0.5 + 0.5 * Math.sin(t * 0.8 + i * 2.1);
+    const a = (0.06 + 0.6 * twinkle * twinkle) * haze * gate;
+    if (a < 0.012) continue; // too faint to bother rasterising
+
+    const size = (0.6 + 1.7 * twinkle) * dpr;
+    // Firmly blue: red stays low so the sparks read as cyan-blue against the neutral fog.
+    vctx.beginPath();
+    vctx.arc(x, y, size, 0, Math.PI * 2);
+    vctx.fillStyle = `rgba(${70 + 70 * twinkle | 0},${160 + 70 * twinkle | 0},255,${a})`;
+    vctx.fill();
+  }
+}
+
+/**
+ * The original tight cluster orbiting the wall, kept alongside the fog field for a dense
+ * band of brighter sparks right on the ring. Golden-angle spacing so they never band; each
+ * weaves in and out across the boundary on two slow cycles. Text-gated like the field.
+ */
+function drawRingMotes(cx, cy, r, t) {
+  vctx.globalCompositeOperation = 'lighter';
+  const fade = 46 * dpr;
+  for (let i = 0; i < RING_MOTES; i++) {
     const speed = 0.020 + 0.016 * Math.sin(i * 1.7);
     const th = i * GOLDEN + t * speed;
-
-    // Drift in and out across the wall, on a slower cycle than the orbit.
-    const band = Math.sin(t * 0.23 + i * 2.6) * 0.5 + Math.sin(t * 0.15 + i * 0.9) * 0.5;
-    const rr = r * (1 + 0.055 * band);
+    const band = 0.5 * Math.sin(t * 0.23 + i * 2.6) + 0.5 * Math.sin(t * 0.15 + i * 0.9);
+    const rr = r * (1 + 0.06 * band);
+    const y = cy + rr * Math.sin(th);
+    const gate = clamp01px((hudTopDev - y) / fade);
+    if (gate <= 0) continue;
 
     const twinkle = 0.5 + 0.5 * Math.sin(t * 0.7 + i * 2.1);
-    const a = 0.1 + 0.62 * twinkle * twinkle;
-    const size = (0.7 + 1.5 * twinkle) * dpr;
-
+    const a = (0.1 + 0.62 * twinkle * twinkle) * gate;
+    const size = (0.7 + 1.6 * twinkle) * dpr;
     vctx.beginPath();
-    vctx.arc(cx + rr * Math.cos(th), cy + rr * Math.sin(th), size, 0, Math.PI * 2);
-    vctx.fillStyle = `rgba(${150 + 60 * twinkle | 0},${215 + 30 * twinkle | 0},245,${a})`;
+    vctx.arc(cx + rr * Math.cos(th), y, size, 0, Math.PI * 2);
+    vctx.fillStyle = `rgba(${90 + 70 * twinkle | 0},${175 + 60 * twinkle | 0},255,${a})`;
     vctx.fill();
   }
 }
@@ -327,7 +397,28 @@ const fmtLocal = (ms, tz) =>
     .format(new Date(ms))
     .replace(/\b(am|pm)\b/, (m) => m.toUpperCase());
 
+/**
+ * Park the countdown block directly under the ring rather than at a fixed height, so the
+ * text reads as belonging to the circle and always sits below it. Clamped so a screen-
+ * filling ring early on doesn't shove the text off the bottom, and so it never rides up over
+ * the map's centre. Also publishes the block's top edge for the mote fade.
+ */
+function positionHud() {
+  if (!ringGeom) return;
+  const stageH = stage.clientHeight;
+  const hudH = hud.offsetHeight || (layout === 'panel' ? 90 : 210);
+  const margin = layout === 'panel' ? 10 : 22;
+  const bottomPad = layout === 'panel' ? 12 : 30;
+  const ringBottomCss = (ringGeom.cy + ringGeom.r) / dpr;
+  const maxTop = Math.max(stageH * 0.1, stageH - hudH - bottomPad);
+  const top = Math.min(maxTop, Math.max(stageH * 0.12, ringBottomCss + margin));
+  hud.style.top = top + 'px';
+  hud.style.bottom = 'auto';
+  hudTopDev = top * dpr;
+}
+
 function drawHud(cfg, state) {
+  positionHud();
   const overdue = state.msToGoLive < 0;
   const delayed = Math.abs(state.delayMs) >= 60_000;
 
@@ -363,7 +454,10 @@ function drawHud(cfg, state) {
  * ---------------------------------------------------------------- */
 
 const STATIC_INTERVAL = 1000 / 30;
-const CAMERA_INTERVAL = 1000 / 10;
+// The camera is driven off ringAt(), a pure function of time, so a higher rate just samples
+// the same trajectory more finely. At 10fps a fast close-in visibly steps; 30fps reads as a
+// continuous glide. In a real six-hour run the per-frame delta is still imperceptible.
+const CAMERA_INTERVAL = 1000 / 30;
 
 let live = null;
 let lastStatic = 0;
